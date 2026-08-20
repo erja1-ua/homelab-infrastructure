@@ -4,6 +4,8 @@
 [![SSH](https://img.shields.io/badge/SSH-ED25519%20%2B%20Zero%20Trust-black?logo=openssh&logoColor=white)](#-fase-2-aprovisionamiento-y-hardening-core)
 [![Firewall](https://img.shields.io/badge/Firewall-UFW-orange)](#-fase-2-aprovisionamiento-y-hardening-core)
 [![Storage](https://img.shields.io/badge/Storage-LVM-blue)](#-fase-2-aprovisionamiento-y-hardening-core)
+[![Docker](https://img.shields.io/badge/Contenedores-Docker%20%2B%20Compose-2496ED?logo=docker&logoColor=white)](#-fase-3-optimización-de-hardware-y-orquestación)
+[![Pi-hole](https://img.shields.io/badge/DNS%20Sinkhole-Pi--hole-red?logo=pihole&logoColor=white)](#-fase-4-despliegue-de-dns-sinkhole-pi-hole-e-iac)
 [![Status](https://img.shields.io/badge/Estado-En%20producción-brightgreen)]()
 
 Documentación técnica del despliegue de un servidor doméstico (**homelab**) desde cero: recuperación de un equipo con Windows 10 inoperativo, instalación bare-metal de Ubuntu Server en modo headless, y hardening de seguridad aplicando principios de **Zero Trust** (autenticación por clave pública, sin acceso root, firewall restrictivo). Este repositorio es la base sobre la que se construirá una arquitectura modular de servicios (contenerización, self-hosting, etc.).
@@ -16,6 +18,8 @@ Documentación técnica del despliegue de un servidor doméstico (**homelab**) d
 - [Arquitectura y Topología](#-arquitectura-y-topología)
 - [Fase 1: Rescate de Datos y Preparación](#-fase-1-rescate-de-datos-y-preparación)
 - [Fase 2: Aprovisionamiento y Hardening Core](#-fase-2-aprovisionamiento-y-hardening-core)
+- [Fase 3: Optimización de Hardware y Orquestación](#-fase-3-optimización-de-hardware-y-orquestación)
+- [Fase 4: Despliegue de DNS Sinkhole (Pi-hole) e IaC](#-fase-4-despliegue-de-dns-sinkhole-pi-hole-e-iac)
 - [Stack Tecnológico](#-stack-tecnológico)
 - [Decisiones de Diseño](#-decisiones-de-diseño)
 - [Roadmap](#-roadmap)
@@ -74,6 +78,40 @@ Activación de UFW con política de **denegación global por defecto** (`default
 
 ---
 
+## ⚙️ Fase 3: Optimización de Hardware y Orquestación
+
+### Configuración headless (Lid Switch)
+
+Modificación del gestor de sesiones **systemd**, editando `/etc/systemd/logind.conf` y estableciendo la directiva `HandleLidSwitch=ignore`. Esto evita la suspensión del sistema al cerrar la tapa física del equipo, garantizando disponibilidad **24/7** y reduciendo el consumo energético frente a mantener la pantalla activa.
+
+### Despliegue de Docker Engine
+
+Instalación del motor de contenedores y el plugin **Docker Compose** desde los repositorios oficiales, verificando las llaves **GPG** antes de la instalación. Se mantiene una postura de seguridad de **mínimo privilegio**, requiriendo el uso explícito de `sudo` para la administración de contenedores en lugar de añadir el usuario al grupo `docker` sin restricciones.
+
+---
+
+## 🕳️ Fase 4: Despliegue de DNS Sinkhole (Pi-hole) e IaC
+
+### Infraestructura como Código (IaC) y gestión de secretos
+
+Inicialización de repositorio Git local implementando un `.gitignore` estricto para aislar credenciales. Las variables de entorno reales se mantienen en archivos `.env` locales, subiendo al control de versiones únicamente plantillas neutras (`.env.example`), evitando así la exposición accidental de secretos.
+
+### Apertura de puertos (UFW)
+
+Reconfiguración del cortafuegos para permitir tráfico entrante en los puertos **53/tcp** y **53/udp** (resolución DNS), así como **80/tcp** (acceso al panel de administración HTTP).
+
+### Troubleshooting
+
+| Problema | Causa raíz | Solución |
+|---|---|---|
+| **Conflicto de puerto DNS** (`address already in use` en el 53) | El *Stub Listener* interno de Ubuntu ocupaba el puerto 53 | Desactivación en `/etc/systemd/resolved.conf` (`DNSStubListener=no`) y regeneración del enlace simbólico de resolución del sistema para liberar el bindeo al contenedor |
+| **Inyección de credenciales fallida** | Parsing incorrecto de caracteres especiales en el archivo `.env` por parte de Docker Compose | Actualización en caliente con `docker exec -it pihole pihole setpassword` para forzar la escritura directa en la base de datos interna de Pi-hole |
+| **Fuga de DNS (DNS Leak)** — el panel de Pi-hole registraba 0 peticiones | El módulo de protección web del antivirus (Norton) secuestraba el tráfico DNS a nivel de núcleo, forzándolo hacia `8.8.8.8` | Rollback de la configuración TCP/IPv4 del cliente Windows a la espera de desinstalar el software antivirus conflictivo |
+
+> El diagnóstico se realizó mediante `nslookup`, confirmando que las resoluciones no pasaban por el sinkhole a pesar de la configuración correcta del cliente — un recordatorio de que el enrutamiento DNS puede secuestrarse por debajo de la capa de aplicación.
+
+---
+
 ## 🧰 Stack Tecnológico
 
 | Categoría | Herramienta |
@@ -84,6 +122,10 @@ Activación de UFW con política de **denegación global por defecto** (`default
 | Criptografía de acceso | ED25519 (OpenSSH) |
 | Firewall | UFW |
 | Virtualización (preparado) | Intel VT-x |
+| Contenerización | Docker Engine + Docker Compose |
+| DNS Sinkhole / Ad-blocking | Pi-hole |
+| Gestión de sesión | systemd (`logind.conf`, `resolved.conf`) |
+| Control de versiones / IaC | Git + `.gitignore` + `.env.example` |
 
 ---
 
@@ -96,12 +138,16 @@ Activación de UFW con política de **denegación global por defecto** (`default
 | Autenticación solo por clave pública | Contraseñas | Elimina el vector de ataque por fuerza bruta |
 | UFW *default deny* | Reglas permisivas | Minimizar superficie de ataque desde el diseño |
 | LVM | Particionado tradicional | Escalabilidad de almacenamiento sin downtime |
+| `HandleLidSwitch=ignore` | Adaptador de corriente + pantalla siempre activa | Disponibilidad 24/7 con menor consumo energético |
+| `sudo` explícito para Docker | Usuario en grupo `docker` | Principio de menor privilegio; evita escalada de privilegios accidental |
+| Secretos en `.env` + `.gitignore` | Credenciales hardcodeadas en el repo | Infraestructura como Código segura, sin exponer datos sensibles |
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] Despliegue de servicios en contenedores (Docker / Podman)
+- [x] Despliegue de servicios en contenedores (Docker + Compose)
+- [x] DNS Sinkhole / bloqueo de publicidad a nivel de red (Pi-hole)
 - [ ] Reverse proxy con TLS (Nginx / Caddy + Let's Encrypt)
 - [ ] Monitorización (Prometheus + Grafana)
 - [ ] Backups automatizados y cifrados
