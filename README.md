@@ -6,6 +6,7 @@
 [![Storage](https://img.shields.io/badge/Storage-LVM-blue)](#-fase-2-aprovisionamiento-y-hardening-core)
 [![Docker](https://img.shields.io/badge/Contenedores-Docker%20%2B%20Compose-2496ED?logo=docker&logoColor=white)](#-fase-3-optimización-de-hardware-y-orquestación)
 [![Pi-hole](https://img.shields.io/badge/DNS%20Sinkhole-Pi--hole-red?logo=pihole&logoColor=white)](#-fase-4-despliegue-de-dns-sinkhole-pi-hole-e-iac)
+[![Tailscale](https://img.shields.io/badge/VPN-Tailscale%20(WireGuard)-1D232A?logo=tailscale&logoColor=white)](#-fase-5-despliegue-de-nube-privada-y-acceso-remoto-vpn)
 [![Status](https://img.shields.io/badge/Estado-En%20producción-brightgreen)]()
 
 Documentación técnica del despliegue de un servidor doméstico (**homelab**) desde cero: recuperación de un equipo con Windows 10 inoperativo, instalación bare-metal de Ubuntu Server en modo headless, y hardening de seguridad aplicando principios de **Zero Trust** (autenticación por clave pública, sin acceso root, firewall restrictivo). Este repositorio es la base sobre la que se construirá una arquitectura modular de servicios (contenerización, self-hosting, etc.).
@@ -20,6 +21,7 @@ Documentación técnica del despliegue de un servidor doméstico (**homelab**) d
 - [Fase 2: Aprovisionamiento y Hardening Core](#-fase-2-aprovisionamiento-y-hardening-core)
 - [Fase 3: Optimización de Hardware y Orquestación](#-fase-3-optimización-de-hardware-y-orquestación)
 - [Fase 4: Despliegue de DNS Sinkhole (Pi-hole) e IaC](#-fase-4-despliegue-de-dns-sinkhole-pi-hole-e-iac)
+- [Fase 5: Despliegue de Nube Privada y Acceso Remoto (VPN)](#-fase-5-despliegue-de-nube-privada-y-acceso-remoto-vpn)
 - [Stack Tecnológico](#-stack-tecnológico)
 - [Decisiones de Diseño](#-decisiones-de-diseño)
 - [Roadmap](#-roadmap)
@@ -112,6 +114,28 @@ Reconfiguración del cortafuegos para permitir tráfico entrante en los puertos 
 
 ---
 
+## ☁️ Fase 5: Despliegue de Nube Privada y Acceso Remoto (VPN)
+
+### Monitorización de hardware (SAI integrado)
+
+Validación del estado de la batería del Lenovo Yoga mediante la utilidad `acpi`, confirmando su viabilidad como **Sistema de Alimentación Ininterrumpida (SAI)** frente a cortes de suministro eléctrico. El equipo mantiene un **70%** de su capacidad de diseño original y opera bajo márgenes térmicos óptimos (**38°C**).
+
+### Almacenamiento y nube privada (enfoque híbrido)
+
+Se ha implementado una solución de almacenamiento accesible tanto localmente como vía web, optimizando el consumo de recursos (RAM) para priorizar futuros despliegues:
+
+1. **FileBrowser (acceso web)**: despliegue mediante Docker Compose de un gestor de archivos ligero. Expuesto a través del puerto `8080/tcp` (aperturado en UFW), con cambio forzado de credenciales por defecto para mitigar vulnerabilidades de acceso.
+2. **Samba / SMB (acceso nativo)**: instalación del servicio `smbd` en el host físico (bare-metal) para compartir el volumen de datos de FileBrowser en la red local. Permite mapear el almacenamiento como unidad de red nativa en clientes Windows, unificando el origen de datos entre ambos accesos.
+
+### Acceso remoto seguro (Zero Trust VPN)
+
+Implementación de **Tailscale** (basado en el protocolo **WireGuard**) para establecer una red *overlay* mediante un túnel cifrado peer-to-peer.
+
+- **Decisión de diseño**: Tailscale negocia las conexiones de salida (*outbound*) hacia sus servidores de coordinación, lo que permite establecer el túnel VPN **sin necesidad de abrir puertos en el router perimetral ni en el cortafuegos (UFW)**.
+- **Resultado**: se mantiene intacta la política `default deny incoming` de la Fase 2. El servidor es ahora accesible desde cualquier red externa (p. ej. la universidad) utilizando una IP virtual reservada (`100.X.X.X`), permitiendo el uso seguro del protocolo SMB y el acceso a FileBrowser fuera de la red local.
+
+---
+
 ## 🧰 Stack Tecnológico
 
 | Categoría | Herramienta |
@@ -126,6 +150,10 @@ Reconfiguración del cortafuegos para permitir tráfico entrante en los puertos 
 | DNS Sinkhole / Ad-blocking | Pi-hole |
 | Gestión de sesión | systemd (`logind.conf`, `resolved.conf`) |
 | Control de versiones / IaC | Git + `.gitignore` + `.env.example` |
+| Nube Privada (Web) | FileBrowser (Docker) |
+| Servidor de Archivos (Local) | Samba (SMB) |
+| VPN / Acceso Remoto | Tailscale (WireGuard) |
+| Monitorización de Hardware | `acpi` |
 
 ---
 
@@ -141,6 +169,9 @@ Reconfiguración del cortafuegos para permitir tráfico entrante en los puertos 
 | `HandleLidSwitch=ignore` | Adaptador de corriente + pantalla siempre activa | Disponibilidad 24/7 con menor consumo energético |
 | `sudo` explícito para Docker | Usuario en grupo `docker` | Principio de menor privilegio; evita escalada de privilegios accidental |
 | Secretos en `.env` + `.gitignore` | Credenciales hardcodeadas en el repo | Infraestructura como Código segura, sin exponer datos sensibles |
+| FileBrowser | Nextcloud / OwnCloud | Menor huella de memoria (RAM) para priorizar el rendimiento del servidor de Minecraft |
+| Tailscale | WireGuard nativo / OpenVPN | Evita la apertura de puertos entrantes (port forwarding), manteniendo la política estricta de UFW |
+| Solución híbrida (SMB + Web) | Solo web (FileBrowser) | Permite integración nativa y de alto rendimiento en el Explorador de Archivos de Windows mediante unidad de red |
 
 ---
 
@@ -148,10 +179,11 @@ Reconfiguración del cortafuegos para permitir tráfico entrante en los puertos 
 
 - [x] Despliegue de servicios en contenedores (Docker + Compose)
 - [x] DNS Sinkhole / bloqueo de publicidad a nivel de red (Pi-hole)
+- [x] VPN de acceso Zero Trust sin apertura de puertos (Tailscale / WireGuard)
+- [x] Nube privada / almacenamiento accesible localmente y por web (FileBrowser + Samba)
 - [ ] Reverse proxy con TLS (Nginx / Caddy + Let's Encrypt)
 - [ ] Monitorización (Prometheus + Grafana)
 - [ ] Backups automatizados y cifrados
-- [ ] VPN de acceso (WireGuard) como capa adicional a SSH
 
 ---
 
