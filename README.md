@@ -174,6 +174,38 @@ Implementación de **Tailscale** (basado en el protocolo **WireGuard**) para est
 | Solución híbrida (SMB + Web) | Solo web (FileBrowser) | Permite integración nativa y de alto rendimiento en el Explorador de Archivos de Windows mediante unidad de red |
 
 ---
+## 🔧 Mantenimiento y Migración de Red (Septiembre 2026)
+
+Tras un cambio de ubicación física y de router, fue necesario realizar una migración de red en el servidor (Ubuntu Server) para abandonar la IP estática local y pasar a una configuración dinámica, asegurando la continuidad de todos los servicios.
+
+### 1. Reconfiguración de Red (Netplan a DHCP)
+Se eliminó la configuración de IP estática (`192.X.X.X`) y la puerta de enlace (`routes`) que estaban forzando el tráfico hacia el router antiguo. 
+* Se editó `/etc/netplan/00-installer-config.yaml` manteniendo la configuración de la tarjeta Ethernet (MAC y set-name) pero configurando la sección Wi-Fi (`wifis`) para usar `dhcp4: true`.
+* Se purgaron las rutas atascadas en memoria mediante `ip addr flush` e `ip route flush table main` antes de aplicar los cambios con `netplan apply`.
+
+### 2. Estabilización de Servicios Remotos y DNS
+Al cambiar la subred local, se ajustaron los servicios que dependían de la IP anterior:
+* **SSH y Tailscale:** Se actualizó el archivo de configuración SSH (`~/.ssh/config`) en el equipo cliente Windows, sustituyendo la IP local obsoleta por la IP estática de Tailscale (`100.x.x.x`). Esto garantiza el acceso remoto ininterrumpido independientemente de la red física del servidor.
+* **Docker y Pi-hole:** Las reglas de enrutamiento (iptables) de Docker quedaron aisladas. Fue necesario destruir la red virtual antigua (`docker compose down`) y reiniciar el servicio de Docker (`systemctl restart docker`). Además, se inyectó la variable de entorno `DNSMASQ_LISTENING=all` en el archivo `docker-compose.yml` para forzar al contenedor de Pi-hole a escuchar y resolver peticiones DNS en la nueva interfaz de red.
+
+---
+
+## 🗄️ Despliegue de Oracle Database (Entorno Académico)
+
+Se ha integrado un contenedor de **Oracle Database 23ai Free** en el homelab con el propósito de disponer de un entorno de pruebas con privilegios máximos (`SYSDBA`). Este despliegue permite realizar prácticas universitarias (asignatura AGBD), estudiar la administración de sistemas gestores de bases de datos y documentar transiciones de instancia sin riesgo de afectar a servidores compartidos.
+
+**Comando de despliegue:**
+```bash
+docker run -d \
+  --name oracle-db \
+  -p 1521:1521 \
+  -e ORACLE_PWD=TuPasswordSeguro \
+  [container-registry.oracle.com/database/free:latest](https://container-registry.oracle.com/database/free:latest)
+
+**Acceso administrativo por terminal (SQL*Plus):**
+docker exec -it oracle-db sqlplus / as sysdba
+
+---
 
 ## 🗺️ Roadmap
 
